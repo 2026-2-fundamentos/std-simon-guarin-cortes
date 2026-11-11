@@ -1,5 +1,5 @@
 from pathlib import Path
-
+import re
 import pandas as pd
 
 ACTIVITY_DIR = Path(__file__).resolve().parents[1]
@@ -182,17 +182,81 @@ def clean_discount_column(df):
     )
 
     return df
+def clean_supplier_id_column(df):
+    # ' 0007 ' -> '0007'
+    df["supplier_id"] = df["supplier_id"].astype(str).str.strip().str.zfill(4)
+    return df
 
+
+def clean_weight_column(df):
+    # Normaliza todo a kg: "50000 g", "0.0050 ton", "2,5 kg", "12" -> float en kg
+    factors = {"g": 0.001, "kg": 1, "ton": 1000}
+
+    def convert_value(value):
+        if pd.isna(value):
+            return value
+        v = str(value).strip().lower().replace(",", ".")
+        match = re.fullmatch(r"([\d.]+)\s*(kg|g|ton)?", v)
+        if not match:
+            return pd.NA
+        number = float(match.group(1))
+        unit = match.group(2) or "kg"  # sin unidad se asume kg
+        return round(number * factors[unit], 3)
+
+    df["weight"] = df["weight"].apply(convert_value)
+    return df
+
+
+def clean_units_column(df):
+    # "N/A" -> NaN, resto a entero
+    df["units"] = pd.to_numeric(df["units"], errors="coerce").astype("Int64")
+    return df
+
+
+def clean_unit_price_column(df):
+    # "$125,000.00", "980.000.00", "$-1,750,000.00" -> float
+    def convert_value(value):
+        if pd.isna(value):
+            return value
+        v = str(value).strip().replace("$", "").replace(",", "")
+        if v.count(".") > 1:  # puntos como separador de miles
+            integer_part, decimal_part = v.rsplit(".", 1)
+            v = integer_part.replace(".", "") + "." + decimal_part
+        try:
+            return abs(float(v))  # un precio no puede ser negativo
+        except ValueError:
+            return pd.NA
+
+    df["unit_price"] = df["unit_price"].apply(convert_value)
+    return df
+
+
+def clean_contact_email_column(df):
+    # "sin correo" -> NaN
+    df["contact_email"] = df["contact_email"].str.strip().str.lower()
+    df["contact_email"] = df["contact_email"].replace("sin correo", pd.NA)
+    return df
+
+
+def remove_duplicates(df):
+    # Elimina las filas repetidas (0005, 0010, 0019)
+    return df.drop_duplicates(subset="supplier_id", keep="first")
 
 def main():
     df = pd.read_csv(INPUT_FILE)
     df = clean_column_names(df)
+    df = clean_supplier_id_column(df)
     df = clean_supplier_column(df)
     df = clean_country_column(df)
     df = clean_city_column(df)
     df = clean_purchase_date_column(df)
     df = clean_amount_column(df)
     df = clean_discount_column(df)
+    df = clean_weight_column(df)
+    df = clean_units_column(df)
+    df = clean_unit_price_column(df)
+    df = clean_contact_email_column(df)
+    df = remove_duplicates(df)
     df.to_csv(OUTPUT_FILE, index=False)
 
 
